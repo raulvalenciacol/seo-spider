@@ -637,8 +637,8 @@ elif not st.session_state.crawl_running:
         """)
     with col2:
         st.markdown("""
-        ### How it compares to Screaming Frog:
-        - ✅ **Free forever** (Screaming Frog = $259/year)
+        ### How it compares to other Screaming spiders:
+        - ✅ **Free forever** (Screaming Spider = $259/year)
         - ✅ No install required
         - ✅ Works in your browser
         - ✅ Download results as CSV
@@ -649,6 +649,6 @@ elif not st.session_state.crawl_running:
 
     st.markdown("""
     <div class="footer">
-        Built with ❤️ using Python + Streamlit | <a href="https://ko-fi.com/CHANGETHIS" target="_blank">☕ Support this project</a>
+        Built with ❤️ using Python + Streamlit | <a href="https://ko-fi.com/raulvalencia" target="_blank">☕ Support this project</a>
     </div>
     """, unsafe_allow_html=True)
