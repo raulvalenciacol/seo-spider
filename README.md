@@ -31,4 +31,4 @@ Python, Streamlit, BeautifulSoup, Pandas
 
 ---
 
-☕ [Buy me a coffee](https://ko-fi.com/CHANGETHIS) if this saved you time!
+☕ [Buy me a coffee](ko-fi.com/raulvalencia) if this saved you time!
