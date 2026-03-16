@@ -481,10 +481,10 @@ with st.sidebar:
         ("Products + Collections", "products_and_collections"),
     ], format_func=lambda x: x[0])
 
-    max_pages = st.slider("Max Pages", 10, 2000, 200, step=10,
+    max_pages = st.slider("Max Pages", 10, 2000, 100, step=10,
                           help="Free hosted version limited to 2,000 pages per crawl")
-    threads = st.slider("Threads", 1, 5, 3, help="Concurrent requests")
-    delay = st.slider("Delay (seconds)", 0.1, 3.0, 0.5, step=0.1,
+    threads = st.slider("Threads", 1, 5, 1, help="Concurrent requests — lower = safer")
+    delay = st.slider("Delay (seconds)", 0.1, 3.0, 1.5, step=0.1,
                       help="Higher delay = less likely to be blocked")
 
     st.markdown("---")
