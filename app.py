@@ -17,6 +17,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed, FIRST_COMPLETED, wait
 import threading
 import copy
+import random
 
 # ─── Page Config ───
 st.set_page_config(page_title="SEO Spider — Free Screaming Frog Alternative", page_icon="🕷️", layout="wide")
@@ -46,22 +47,36 @@ if "crawl_results" not in st.session_state:
 if "image_results" not in st.session_state:
     st.session_state.image_results = None
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Sec-Ch-Ua": '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="8"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Cache-Control": "max-age=0",
-}
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+]
+
+def get_headers():
+    ua = random.choice(USER_AGENTS)
+    headers = {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
+    }
+    if "Chrome" in ua:
+        ver = re.search(r"Chrome/(\d+)", ua).group(1)
+        headers["Sec-Ch-Ua"] = f'"Chromium";v="{ver}", "Google Chrome";v="{ver}", "Not-A.Brand";v="8"'
+        headers["Sec-Ch-Ua-Mobile"] = "?0"
+        headers["Sec-Ch-Ua-Platform"] = '"Windows"' if "Windows" in ua else '"macOS"' if "Mac" in ua else '"Linux"'
+    return headers
 
 
 def get_domain(url):
@@ -191,7 +206,11 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
 
     try:
         start = time.time()
-        r = session.get(url, timeout=30, allow_redirects=True)
+        r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers())
+        # Retry once with fresh headers if blocked
+        if r.status_code in (403, 429):
+            time.sleep(random.uniform(1.0, 3.0))
+            r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers())
         elapsed = round(time.time() - start, 3)
 
         row["Response Time"] = elapsed
@@ -343,7 +362,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
         return active_filter is None or any(p in url for p in active_filter)
 
     session = requests.Session()
-    session.headers.update(HEADERS)
+    session.headers.update(get_headers())
 
     # Warm up session
     status_text.text("🔐 Initializing session...")
@@ -392,7 +411,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
             crawled += 1
         progress_bar.progress(min(crawled / max_pages, 1.0))
         status_text.text(f"🕷️ Crawled {crawled} / {max_pages} — {url[:70]}...")
-        time.sleep(delay)
+        time.sleep(delay + random.uniform(0, delay * 0.5))
         return [(u, depth + 1) for u in discovered if get_domain(u) == base_domain]
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
@@ -463,7 +482,8 @@ with st.sidebar:
     max_pages = st.slider("Max Pages", 10, 2000, 200, step=10,
                           help="Free hosted version limited to 2,000 pages per crawl")
     threads = st.slider("Threads", 1, 5, 3, help="Concurrent requests")
-    delay = st.slider("Delay (seconds)", 0.1, 2.0, 0.3, step=0.1)
+    delay = st.slider("Delay (seconds)", 0.1, 3.0, 0.5, step=0.1,
+                      help="Higher delay = less likely to be blocked")
 
     st.markdown("---")
 
