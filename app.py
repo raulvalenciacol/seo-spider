@@ -14,8 +14,9 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, FIRST_COMPLETED, wait
 import threading
+import copy
 
 # ─── Page Config ───
 st.set_page_config(page_title="SEO Spider — Free Screaming Frog Alternative", page_icon="🕷️", layout="wide")
@@ -84,7 +85,7 @@ def get_sitemap_urls(base_url, session):
             for line in r.text.splitlines():
                 if line.lower().startswith("sitemap:"):
                     sitemap_locations.append(line.split(":", 1)[1].strip())
-    except:
+    except Exception:
         pass
 
     def parse_sitemap(url, depth=0):
@@ -100,7 +101,7 @@ def get_sitemap_urls(base_url, session):
                 parse_sitemap(sitemap.text.strip(), depth + 1)
             for loc in root.findall(".//s:url/s:loc", ns):
                 urls.add(loc.text.strip())
-        except:
+        except Exception:
             pass
 
     for loc in set(sitemap_locations):
@@ -179,7 +180,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
         "Average Words Per Sentence": 0, "Flesch Reading Ease Score": 0,
         "Readability": "", "Text Ratio": 0,
         "Crawl Depth": crawl_depth,
-        "Folder Depth": url.rstrip("/").count("/") - 2,
+        "Folder Depth": url.rstrip("/").count("/") - 2,  # subtract 2 for scheme slashes (https://)
         "Response Time": 0, "Redirect URL": "", "Redirect Type": "",
         "Language": "", "Last Modified": "",
         "Hash": "", "URL Encoded Address": url,
@@ -273,7 +274,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
         row["Indexability"] = idx
         row["Indexability Status"] = idx_status
 
-        text_content = extract_text_content(BeautifulSoup(r.text, "html.parser"))
+        text_content = extract_text_content(copy.copy(soup))
         row["Word Count"] = len(text_content.split())
         html_size = len(r.text)
         text_size = len(text_content)
@@ -286,6 +287,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
 
         row["Hash"] = hashlib.md5(r.content).hexdigest()
 
+        external_urls = []
         for a_tag in soup.find_all("a", href=True):
             href = a_tag["href"].strip()
             if href.startswith(("#", "mailto:", "tel:", "javascript:")):
@@ -294,6 +296,8 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
             full_url = normalize_url(full_url)
             if get_domain(full_url) == base_domain:
                 discovered_urls.append(full_url)
+            else:
+                external_urls.append(full_url)
 
         for img in soup.find_all("img"):
             src = img.get("src", "").strip() or img.get("data-src", "").strip()
@@ -311,14 +315,17 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
     except requests.Timeout:
         row["Status Code"] = 0
         row["Status"] = "Timeout"
+        external_urls = []
     except requests.ConnectionError:
         row["Status Code"] = 0
         row["Status"] = "Connection Error"
+        external_urls = []
     except Exception as e:
         row["Status Code"] = 0
         row["Status"] = f"Error: {str(e)[:50]}"
+        external_urls = []
 
-    return row, discovered_urls, images_found
+    return row, discovered_urls, images_found, external_urls
 
 
 def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all"):
@@ -343,7 +350,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
     try:
         session.get(base_url, timeout=15)
         time.sleep(1)
-    except:
+    except Exception:
         pass
 
     status_text.text("📄 Fetching sitemap URLs...")
@@ -371,17 +378,18 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
                 return []
             visited.add(norm)
 
-        row, discovered, images = crawl_url(url, session, base_domain, depth)
+        row, discovered, images, external = crawl_url(url, session, base_domain, depth)
 
-        if url_matches_filter(url):
-            with lock:
+        with lock:
+            if url_matches_filter(url):
                 results.append(row)
                 all_images.extend(images)
                 for d_url in discovered:
                     inlinks[d_url].add(url)
                     outlinks[url]["internal"].add(d_url)
-
-        crawled += 1
+                for e_url in external:
+                    outlinks[url]["external"].add(e_url)
+            crawled += 1
         progress_bar.progress(min(crawled / max_pages, 1.0))
         status_text.text(f"🕷️ Crawled {crawled} / {max_pages} — {url[:70]}...")
         time.sleep(delay)
@@ -399,11 +407,8 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
             queue_idx += 1
 
         while futures and crawled < max_pages:
-            done = [f for f in list(futures.keys()) if f.done()]
-            if not done:
-                time.sleep(0.05)
-                continue
-            for f in done:
+            completed, _ = wait(set(futures.keys()), return_when=FIRST_COMPLETED)
+            for f in completed:
                 try:
                     new_urls = f.result()
                     for new_url, new_depth in new_urls:
@@ -411,7 +416,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
                         with lock:
                             if norm not in visited and crawled < max_pages:
                                 queue.append((new_url, new_depth))
-                except:
+                except Exception:
                     pass
                 del futures[f]
 
@@ -467,7 +472,7 @@ with st.sidebar:
     <div class="donate-box">
         <p style="font-size: 1.1rem; margin-bottom: 8px;">☕ Like this tool?</p>
         <p style="font-size: 0.85rem; margin-bottom: 12px;">Built with ❤️ by a fellow e-commerce operator. If it saves you time (and $$$), consider buying me a coffee!</p>
-        <a href="https://ko-fi.com/CHANGETHIS" target="_blank" style="background: #ffd700; color: #333; padding: 8px 20px; border-radius: 6px; display: inline-block;">☕ Buy Me a Coffee</a>
+        <a href="https://ko-fi.com/raulvalencia" target="_blank" style="background: #ffd700; color: #333; padding: 8px 20px; border-radius: 6px; display: inline-block;">☕ Buy Me a Coffee</a>
     </div>
     """, unsafe_allow_html=True)
 
@@ -637,8 +642,8 @@ elif not st.session_state.crawl_running:
         """)
     with col2:
         st.markdown("""
-        ### How it compares to other Screaming spiders:
-        - ✅ **Free forever** (Screaming Spider = $259/year)
+        ### How it compares to Screaming Frog:
+        - ✅ **Free forever** (Screaming Frog = $259/year)
         - ✅ No install required
         - ✅ Works in your browser
         - ✅ Download results as CSV
