@@ -347,7 +347,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
     return row, discovered_urls, images_found, external_urls
 
 
-def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all"):
+def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all", proxy_url=None):
     base_domain = get_domain(start_url)
     base_url = f"{urlparse(start_url).scheme}://{base_domain}"
 
@@ -363,6 +363,8 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
 
     session = requests.Session()
     session.headers.update(get_headers())
+    if proxy_url:
+        session.proxies = {"http": proxy_url, "https": proxy_url}
 
     # Warm up session
     status_text.text("🔐 Initializing session...")
@@ -486,6 +488,14 @@ with st.sidebar:
                       help="Higher delay = less likely to be blocked")
 
     st.markdown("---")
+    st.markdown("**🔒 Proxy Settings** *(optional — avoids blocks)*")
+    proxy_input = st.text_input("Proxy URL", placeholder="http://user:pass@proxy:port",
+                                help="Supports HTTP/HTTPS/SOCKS5 proxies. Works with ScraperAPI, Bright Data, Oxylabs, etc.",
+                                type="password")
+    if proxy_input:
+        st.success("Proxy configured", icon="✅")
+
+    st.markdown("---")
 
     # Donation box
     st.markdown("""
@@ -514,7 +524,8 @@ if crawl_button and url_input:
     status_text = st.empty()
 
     try:
-        data, images = run_spider(url, max_pages, threads, delay, progress_bar, status_text, url_filter[1])
+        data, images = run_spider(url, max_pages, threads, delay, progress_bar, status_text, url_filter[1],
+                                  proxy_url=proxy_input.strip() if proxy_input else None)
         st.session_state.crawl_results = data
         st.session_state.image_results = images
         status_text.text(f"✅ Done! {len(data)} pages crawled. {len(images)} images audited.")
