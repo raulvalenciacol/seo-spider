@@ -98,10 +98,14 @@ echo
 echo "[3/3] Starting SEO Spider..."
 echo
 echo "============================================"
-echo "  Open your browser to:"
-echo "  http://localhost:8501"
+echo "  Your browser will open automatically."
+echo "  If not, go to: http://localhost:8501"
 echo "============================================"
 echo "  Press Ctrl+C to stop the server."
 echo "============================================"
 echo
+
+# Open browser after a short delay (backup in case Streamlit doesn't)
+(sleep 3 && if command -v xdg-open &> /dev/null; then xdg-open http://localhost:8501; elif command -v open &> /dev/null; then open http://localhost:8501; fi) &
+
 streamlit run "$SCRIPT_DIR/app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false

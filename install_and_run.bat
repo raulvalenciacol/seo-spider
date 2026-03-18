@@ -106,11 +106,15 @@ echo.
 echo [2/2] Starting SEO Spider...
 echo.
 echo ============================================
-echo   Open your browser to:
-echo   http://localhost:8501
+echo   Your browser will open automatically.
+echo   If not, go to: http://localhost:8501
 echo ============================================
 echo   Press Ctrl+C to stop the server.
 echo ============================================
 echo.
+
+:: Open browser after a short delay (Streamlit sometimes doesn't)
+start "" cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:8501"
+
 "%STREAMLIT_EXE%" run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
 pause
