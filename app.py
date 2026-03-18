@@ -58,7 +58,8 @@ BROWSER_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
 ]
 
-def get_headers(use_spider_ua=False):
+def build_session_headers(use_spider_ua=False):
+    """Pick ONE consistent set of headers for the entire crawl session."""
     if use_spider_ua:
         return {
             "User-Agent": SPIDER_USER_AGENT,
@@ -77,7 +78,7 @@ def get_headers(use_spider_ua=False):
         "Upgrade-Insecure-Requests": "1",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-User": "?1",
         "Cache-Control": "max-age=0",
     }
@@ -189,7 +190,7 @@ def get_indexability(meta_robots, canonical, url):
     return ("Non-Indexable", reason) if noindex else ("Indexable", "")
 
 
-def crawl_url(url, session, base_domain, crawl_depth=0, use_spider_ua=False):
+def crawl_url(url, session, base_domain, crawl_depth=0):
     row = {
         "Address": url, "Content Type": "", "Status Code": "", "Status": "",
         "Indexability": "", "Indexability Status": "",
@@ -216,11 +217,11 @@ def crawl_url(url, session, base_domain, crawl_depth=0, use_spider_ua=False):
 
     try:
         start = time.time()
-        r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers(use_spider_ua))
-        # Retry once with fresh headers if blocked
+        r = session.get(url, timeout=30, allow_redirects=True)
+        # Retry once with backoff if blocked
         if r.status_code in (403, 429):
-            time.sleep(random.uniform(1.0, 3.0))
-            r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers(use_spider_ua))
+            time.sleep(random.uniform(2.0, 5.0))
+            r = session.get(url, timeout=30, allow_redirects=True)
         elapsed = round(time.time() - start, 3)
 
         row["Response Time"] = elapsed
@@ -372,17 +373,21 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
         return active_filter is None or any(p in url for p in active_filter)
 
     session = requests.Session()
-    session.headers.update(get_headers(use_spider_ua))
+    session.headers.update(build_session_headers(use_spider_ua))
     if proxy_url:
         session.proxies = {"http": proxy_url, "https": proxy_url}
 
-    # Warm up session
+    # Warm up session — visit homepage first to get cookies (like a real browser)
     status_text.text("🔐 Initializing session...")
     try:
-        session.get(base_url, timeout=15)
-        time.sleep(1)
+        # First visit uses Sec-Fetch-Site: none (direct navigation)
+        warmup_headers = {"Sec-Fetch-Site": "none", "Referer": base_url + "/"}
+        session.get(base_url, timeout=15, headers=warmup_headers)
+        time.sleep(random.uniform(1.5, 3.0))
     except Exception:
         pass
+    # All subsequent requests look like same-origin navigation with a referer
+    session.headers.update({"Referer": base_url + "/"})
 
     status_text.text("📄 Fetching sitemap URLs...")
     sitemap_urls = get_sitemap_urls(base_url, session)
@@ -410,7 +415,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
                 return []
             visited.add(norm)
 
-        row, discovered, images, external = crawl_url(url, session, base_domain, depth, use_spider_ua)
+        row, discovered, images, external = crawl_url(url, session, base_domain, depth)
 
         with lock:
             if url_matches_filter(url):
@@ -497,8 +502,8 @@ with st.sidebar:
 
     max_pages = st.slider("Max Pages", 10, 50000, 500, step=10,
                           help="No limit when running locally!")
-    threads = st.slider("Threads", 1, 20, 4, help="Concurrent requests — lower = safer")
-    delay = st.slider("Delay (seconds)", 0.0, 3.0, 0.3, step=0.1,
+    threads = st.slider("Threads", 1, 20, 2, help="Concurrent requests — lower = safer")
+    delay = st.slider("Delay (seconds)", 0.0, 5.0, 1.0, step=0.1,
                       help="Higher delay = less likely to be blocked")
 
     st.markdown("---")
