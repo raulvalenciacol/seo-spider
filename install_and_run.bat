@@ -14,6 +14,22 @@ set "PYTHON_EXE=%PYTHON_DIR%\python.exe"
 set "PIP_EXE=%PYTHON_DIR%\Scripts\pip.exe"
 set "STREAMLIT_EXE=%PYTHON_DIR%\Scripts\streamlit.exe"
 
+:: ─── Auto-Update ───
+:: If this is a git repo, pull the latest changes automatically
+if exist "%SCRIPT_DIR%.git" (
+    git --version >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [UPDATE] Checking for updates...
+        git -C "%SCRIPT_DIR%" pull origin main --ff-only >nul 2>&1
+        if !errorlevel! equ 0 (
+            echo [OK] Up to date.
+        ) else (
+            echo [INFO] Could not auto-update. Continuing with current version.
+        )
+        echo.
+    )
+)
+
 :: Check if portable Python already exists
 if exist "%PYTHON_EXE%" (
     echo [OK] Portable Python found.

@@ -8,6 +8,19 @@ echo "============================================"
 echo
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ─── Auto-Update ───
+# If this is a git repo, pull the latest changes automatically
+if [ -d "$SCRIPT_DIR/.git" ] && command -v git &> /dev/null; then
+    echo "[UPDATE] Checking for updates..."
+    if git -C "$SCRIPT_DIR" pull origin main --ff-only &> /dev/null; then
+        echo "[OK] Up to date."
+    else
+        echo "[INFO] Could not auto-update. Continuing with current version."
+    fi
+    echo
+fi
+
 PYTHON_CMD=""
 
 # Find Python 3
