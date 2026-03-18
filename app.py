@@ -237,7 +237,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
         if "text/html" not in content_type:
             row["Indexability"] = "Non-Indexable"
             row["Indexability Status"] = "Non-HTML"
-            return row, discovered_urls, images_found
+            return row, discovered_urls, images_found, []
 
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -481,10 +481,10 @@ with st.sidebar:
         ("Products + Collections", "products_and_collections"),
     ], format_func=lambda x: x[0])
 
-    max_pages = st.slider("Max Pages", 10, 2000, 100, step=10,
-                          help="Free hosted version limited to 2,000 pages per crawl")
-    threads = st.slider("Threads", 1, 5, 1, help="Concurrent requests — lower = safer")
-    delay = st.slider("Delay (seconds)", 0.1, 3.0, 1.5, step=0.1,
+    max_pages = st.slider("Max Pages", 10, 50000, 500, step=10,
+                          help="No limit when running locally!")
+    threads = st.slider("Threads", 1, 20, 4, help="Concurrent requests — lower = safer")
+    delay = st.slider("Delay (seconds)", 0.0, 3.0, 0.3, step=0.1,
                       help="Higher delay = less likely to be blocked")
 
     st.markdown("---")
