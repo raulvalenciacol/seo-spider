@@ -47,7 +47,9 @@ if "crawl_results" not in st.session_state:
 if "image_results" not in st.session_state:
     st.session_state.image_results = None
 
-USER_AGENTS = [
+SPIDER_USER_AGENT = "SEOSpider/1.0 (+https://github.com/raulvalenciacol/seo-spider)"
+
+BROWSER_USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
@@ -56,8 +58,16 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
 ]
 
-def get_headers():
-    ua = random.choice(USER_AGENTS)
+def get_headers(use_spider_ua=False):
+    if use_spider_ua:
+        return {
+            "User-Agent": SPIDER_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+    ua = random.choice(BROWSER_USER_AGENTS)
     headers = {
         "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -179,7 +189,7 @@ def get_indexability(meta_robots, canonical, url):
     return ("Non-Indexable", reason) if noindex else ("Indexable", "")
 
 
-def crawl_url(url, session, base_domain, crawl_depth=0):
+def crawl_url(url, session, base_domain, crawl_depth=0, use_spider_ua=False):
     row = {
         "Address": url, "Content Type": "", "Status Code": "", "Status": "",
         "Indexability": "", "Indexability Status": "",
@@ -206,11 +216,11 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
 
     try:
         start = time.time()
-        r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers())
+        r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers(use_spider_ua))
         # Retry once with fresh headers if blocked
         if r.status_code in (403, 429):
             time.sleep(random.uniform(1.0, 3.0))
-            r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers())
+            r = session.get(url, timeout=30, allow_redirects=True, headers=get_headers(use_spider_ua))
         elapsed = round(time.time() - start, 3)
 
         row["Response Time"] = elapsed
@@ -347,7 +357,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
     return row, discovered_urls, images_found, external_urls
 
 
-def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all", proxy_url=None):
+def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all", proxy_url=None, use_spider_ua=False):
     base_domain = get_domain(start_url)
     base_url = f"{urlparse(start_url).scheme}://{base_domain}"
 
@@ -362,7 +372,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
         return active_filter is None or any(p in url for p in active_filter)
 
     session = requests.Session()
-    session.headers.update(get_headers())
+    session.headers.update(get_headers(use_spider_ua))
     if proxy_url:
         session.proxies = {"http": proxy_url, "https": proxy_url}
 
@@ -386,20 +396,21 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
     visited = set()
     results = []
     all_images = []
+    blocked_count = 0
     inlinks = defaultdict(set)
     outlinks = defaultdict(lambda: {"internal": set(), "external": set()})
     crawled = 0
     lock = threading.Lock()
 
     def process_url(url, depth):
-        nonlocal crawled
+        nonlocal crawled, blocked_count
         norm = normalize_url(url)
         with lock:
             if norm in visited:
                 return []
             visited.add(norm)
 
-        row, discovered, images, external = crawl_url(url, session, base_domain, depth)
+        row, discovered, images, external = crawl_url(url, session, base_domain, depth, use_spider_ua)
 
         with lock:
             if url_matches_filter(url):
@@ -410,9 +421,12 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
                     outlinks[url]["internal"].add(d_url)
                 for e_url in external:
                     outlinks[url]["external"].add(e_url)
+            if row.get("Status Code") in (403, 429, 503):
+                blocked_count += 1
             crawled += 1
         progress_bar.progress(min(crawled / max_pages, 1.0))
-        status_text.text(f"🕷️ Crawled {crawled} / {max_pages} — {url[:70]}...")
+        blocked_warning = f" | {blocked_count} blocked" if blocked_count > 0 else ""
+        status_text.text(f"🕷️ Crawled {crawled} / {max_pages}{blocked_warning} — {url[:70]}...")
         time.sleep(delay + random.uniform(0, delay * 0.5))
         return [(u, depth + 1) for u in discovered if get_domain(u) == base_domain]
 
@@ -460,7 +474,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
         row["Unique External Outlinks"] = row["External Outlinks"]
         row["% of Total"] = round(row["Inlinks"] / total * 100, 3) if total > 0 else 0
 
-    return results, all_images
+    return results, all_images, blocked_count
 
 
 # ─── UI ───
@@ -488,6 +502,17 @@ with st.sidebar:
                       help="Higher delay = less likely to be blocked")
 
     st.markdown("---")
+    st.markdown("**🤖 User-Agent Mode**")
+    use_spider_ua = st.toggle(
+        "Use SEOSpider User-Agent",
+        value=False,
+        help="When ON, the crawler identifies itself as 'SEOSpider/1.0' — easy to whitelist in your firewall. When OFF, it mimics a regular browser."
+    )
+    if use_spider_ua:
+        st.code(SPIDER_USER_AGENT, language=None)
+        st.caption("Whitelist this User-Agent in your firewall/CDN.")
+
+    st.markdown("---")
     st.markdown("**🔒 Proxy Settings** *(optional — avoids blocks)*")
     proxy_input = st.text_input("Proxy URL", placeholder="http://user:pass@proxy:port",
                                 help="Supports HTTP/HTTPS/SOCKS5 proxies. Works with ScraperAPI, Bright Data, Oxylabs, etc.",
@@ -496,6 +521,44 @@ with st.sidebar:
         st.success("Proxy configured", icon="✅")
 
     st.markdown("---")
+
+    with st.expander("🛡️ Getting blocked? Whitelist the crawler"):
+        st.markdown(f"""
+**Your crawler User-Agent:**
+""")
+        st.code(SPIDER_USER_AGENT if use_spider_ua else "Browser UA (rotating)", language=None)
+        st.markdown("""
+**Tip:** Toggle on "Use SEOSpider User-Agent" above, then whitelist it on your platform:
+
+**Cloudflare:**
+1. Go to **Security > WAF > Custom Rules**
+2. Create rule: *When User-Agent contains `SEOSpider`* → **Allow**
+3. Or go to **Security > Bots** and add the User-Agent to the allow list
+
+**Sucuri:**
+1. Go to **Security > Access Control > Whitelist User-Agent**
+2. Add `SEOSpider`
+
+**Wordfence (WordPress):**
+1. Go to **Wordfence > Firewall > Blocking**
+2. Add a whitelist rule for User-Agent containing `SEOSpider`
+
+**Shopify (Cloudflare-protected):**
+1. If you have Cloudflare in front: follow the Cloudflare steps above
+2. If using Shopify's built-in protection: try reducing threads to 1 and delay to 2+ seconds
+
+**AWS WAF / CloudFront:**
+1. Create a rule in your Web ACL
+2. Match on `User-Agent` header containing `SEOSpider` → **Allow**
+
+**Akamai:**
+1. Go to **Security > Bot Manager**
+2. Add `SEOSpider` to your custom bot allow list
+
+**General / Other WAFs:**
+- Whitelist User-Agent: `SEOSpider`
+- Or whitelist your IP address in the firewall
+""")
 
     # Donation box
     st.markdown("""
@@ -507,7 +570,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("**⚠️ Note:** Some sites with heavy bot protection (Shopify stores with Cloudflare) may block the crawler. Works great on WordPress, WooCommerce, Magento, and most other platforms.")
+    st.markdown("**⚠️ Note:** Some sites with heavy bot protection (Shopify stores with Cloudflare) may block the crawler. Toggle on the SEOSpider User-Agent and whitelist it on your site for best results.")
 
     crawl_button = st.button("🚀 Start Crawl", type="primary", use_container_width=True,
                              disabled=st.session_state.crawl_running)
@@ -524,11 +587,22 @@ if crawl_button and url_input:
     status_text = st.empty()
 
     try:
-        data, images = run_spider(url, max_pages, threads, delay, progress_bar, status_text, url_filter[1],
-                                  proxy_url=proxy_input.strip() if proxy_input else None)
+        data, images, blocked = run_spider(url, max_pages, threads, delay, progress_bar, status_text, url_filter[1],
+                                           proxy_url=proxy_input.strip() if proxy_input else None,
+                                           use_spider_ua=use_spider_ua)
         st.session_state.crawl_results = data
         st.session_state.image_results = images
-        status_text.text(f"✅ Done! {len(data)} pages crawled. {len(images)} images audited.")
+        blocked_msg = f" ({blocked} blocked)" if blocked > 0 else ""
+        status_text.text(f"✅ Done! {len(data)} pages crawled{blocked_msg}. {len(images)} images audited.")
+        if blocked > 0:
+            block_pct = round(blocked / max(len(data), 1) * 100)
+            st.warning(
+                f"**{blocked} URLs were blocked** (403/429/503) — {block_pct}% of crawled pages. "
+                f"Your site's firewall is likely blocking the crawler.\n\n"
+                f"**To fix this:** Enable the **SEOSpider User-Agent** in the sidebar, then whitelist "
+                f"`SEOSpider` in your firewall/CDN. See the **'Getting blocked?'** section in the sidebar for step-by-step instructions.",
+                icon="🚫"
+            )
     except Exception as e:
         st.error(f"Crawl failed: {str(e)}")
     finally:
@@ -571,7 +645,8 @@ if st.session_state.crawl_results:
     c3.metric("200 OK", len(df[df["Status Code"] == 200]))
     c4.metric("301/302", len(df[df["Status Code"].isin([301, 302])]))
     c5.metric("404s", len(df[df["Status Code"] == 404]))
-    c6.metric("Indexable", len(df[df["Indexability"] == "Indexable"]))
+    blocked_total = len(df[df["Status Code"].isin([403, 429, 503])])
+    c6.metric("Blocked", blocked_total) if blocked_total > 0 else c6.metric("Indexable", len(df[df["Indexability"] == "Indexable"]))
 
     st.markdown("### 🔍 SEO Issues")
     c1, c2, c3, c4 = st.columns(4)
