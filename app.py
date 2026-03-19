@@ -651,7 +651,10 @@ if st.session_state.crawl_results:
     c4.metric("301/302", len(df[df["Status Code"].isin([301, 302])]))
     c5.metric("404s", len(df[df["Status Code"] == 404]))
     blocked_total = len(df[df["Status Code"].isin([403, 429, 503])])
-    c6.metric("Blocked", blocked_total) if blocked_total > 0 else c6.metric("Indexable", len(df[df["Indexability"] == "Indexable"]))
+    if blocked_total > 0:
+        c6.metric("Blocked", blocked_total)
+    else:
+        c6.metric("Indexable", len(df[df["Indexability"] == "Indexable"]))
 
     st.markdown("### 🔍 SEO Issues")
     c1, c2, c3, c4 = st.columns(4)
