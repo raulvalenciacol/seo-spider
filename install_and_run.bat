@@ -41,8 +41,7 @@ python --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] System Python found.
     set "PYTHON_EXE=python"
-    set "PIP_EXE=pip"
-    set "STREAMLIT_EXE=streamlit"
+    set "USE_SYSTEM_PYTHON=1"
     goto :install_deps
 )
 
@@ -94,7 +93,11 @@ echo.
 
 :install_deps
 echo [1/2] Installing dependencies (first run may take a minute)...
-"%PIP_EXE%" install -r "%SCRIPT_DIR%requirements.txt" --no-warn-script-location -q
+if defined USE_SYSTEM_PYTHON (
+    "%PYTHON_EXE%" -m pip install -r "%SCRIPT_DIR%requirements.txt" --no-warn-script-location -q
+) else (
+    "%PIP_EXE%" install -r "%SCRIPT_DIR%requirements.txt" --no-warn-script-location -q
+)
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install dependencies.
     pause
@@ -116,5 +119,9 @@ echo.
 :: Open browser after a short delay (Streamlit sometimes doesn't)
 start "" cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:8501"
 
-"%STREAMLIT_EXE%" run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+if defined USE_SYSTEM_PYTHON (
+    "%PYTHON_EXE%" -m streamlit run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+) else (
+    "%STREAMLIT_EXE%" run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+)
 pause
