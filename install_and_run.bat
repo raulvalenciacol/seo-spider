@@ -14,6 +14,22 @@ set "PYTHON_EXE=%PYTHON_DIR%\python.exe"
 set "PIP_EXE=%PYTHON_DIR%\Scripts\pip.exe"
 set "STREAMLIT_EXE=%PYTHON_DIR%\Scripts\streamlit.exe"
 
+:: ─── Auto-Update ───
+:: If this is a git repo, pull the latest changes automatically
+if exist "%SCRIPT_DIR%.git" (
+    git --version >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [UPDATE] Checking for updates...
+        git -C "%SCRIPT_DIR%" pull origin main --ff-only >nul 2>&1
+        if !errorlevel! equ 0 (
+            echo [OK] Up to date.
+        ) else (
+            echo [INFO] Could not auto-update. Continuing with current version.
+        )
+        echo.
+    )
+)
+
 :: Check if portable Python already exists
 if exist "%PYTHON_EXE%" (
     echo [OK] Portable Python found.
@@ -25,8 +41,7 @@ python --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] System Python found.
     set "PYTHON_EXE=python"
-    set "PIP_EXE=pip"
-    set "STREAMLIT_EXE=streamlit"
+    set "USE_SYSTEM_PYTHON=1"
     goto :install_deps
 )
 
@@ -78,7 +93,11 @@ echo.
 
 :install_deps
 echo [1/2] Installing dependencies (first run may take a minute)...
-"%PIP_EXE%" install -r "%SCRIPT_DIR%requirements.txt" --no-warn-script-location -q
+if defined USE_SYSTEM_PYTHON (
+    "%PYTHON_EXE%" -m pip install -r "%SCRIPT_DIR%requirements.txt" --no-warn-script-location -q
+) else (
+    "%PIP_EXE%" install -r "%SCRIPT_DIR%requirements.txt" --no-warn-script-location -q
+)
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install dependencies.
     pause
@@ -90,11 +109,19 @@ echo.
 echo [2/2] Starting SEO Spider...
 echo.
 echo ============================================
-echo   Open your browser to:
-echo   http://localhost:8501
+echo   Your browser will open automatically.
+echo   If not, go to: http://localhost:8501
 echo ============================================
 echo   Press Ctrl+C to stop the server.
 echo ============================================
 echo.
-"%STREAMLIT_EXE%" run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+
+:: Open browser after a short delay (Streamlit sometimes doesn't)
+start "" cmd /c "timeout /t 3 /nobreak >nul && start http://localhost:8501"
+
+if defined USE_SYSTEM_PYTHON (
+    "%PYTHON_EXE%" -m streamlit run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+) else (
+    "%STREAMLIT_EXE%" run "%SCRIPT_DIR%app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
+)
 pause

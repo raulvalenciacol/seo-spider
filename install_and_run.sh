@@ -8,6 +8,19 @@ echo "============================================"
 echo
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ─── Auto-Update ───
+# If this is a git repo, pull the latest changes automatically
+if [ -d "$SCRIPT_DIR/.git" ] && command -v git &> /dev/null; then
+    echo "[UPDATE] Checking for updates..."
+    if git -C "$SCRIPT_DIR" pull origin main --ff-only &> /dev/null; then
+        echo "[OK] Up to date."
+    else
+        echo "[INFO] Could not auto-update. Continuing with current version."
+    fi
+    echo
+fi
+
 PYTHON_CMD=""
 
 # Find Python 3
@@ -85,10 +98,14 @@ echo
 echo "[3/3] Starting SEO Spider..."
 echo
 echo "============================================"
-echo "  Open your browser to:"
-echo "  http://localhost:8501"
+echo "  Your browser will open automatically."
+echo "  If not, go to: http://localhost:8501"
 echo "============================================"
 echo "  Press Ctrl+C to stop the server."
 echo "============================================"
 echo
+
+# Open browser after a short delay (backup in case Streamlit doesn't)
+(sleep 3 && if command -v xdg-open &> /dev/null; then xdg-open http://localhost:8501; elif command -v open &> /dev/null; then open http://localhost:8501; fi) &
+
 streamlit run "$SCRIPT_DIR/app.py" --server.port 8501 --server.headless false --browser.gatherUsageStats false
