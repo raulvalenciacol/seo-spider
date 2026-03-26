@@ -46,6 +46,8 @@ if "crawl_results" not in st.session_state:
     st.session_state.crawl_results = None
 if "image_results" not in st.session_state:
     st.session_state.image_results = None
+if "stop_crawl" not in st.session_state:
+    st.session_state.stop_crawl = False
 
 SPIDER_USER_AGENT = "SEOSpider/1.0 (+https://github.com/raulvalenciacol/seo-spider)"
 
@@ -358,7 +360,7 @@ def crawl_url(url, session, base_domain, crawl_depth=0):
     return row, discovered_urls, images_found, external_urls
 
 
-def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all", proxy_url=None, use_spider_ua=False):
+def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, url_filter="all", proxy_url=None, use_spider_ua=False, stop_flag=None):
     base_domain = get_domain(start_url)
     base_url = f"{urlparse(start_url).scheme}://{base_domain}"
 
@@ -369,8 +371,28 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
     }
     active_filter = filter_patterns.get(url_filter)
 
+    # Dynamic/parameterized URL patterns to skip (avoid crawling filtered/sorted/paginated variants)
+    DYNAMIC_PARAMS_SKIP = re.compile(
+        r'[?&](sort_by|sort|order|filter|variant|view|preview|fbclid|gclid|utm_|mc_|_ga|_gl|ref=|referer|search|q=)',
+        re.I
+    )
+
     def url_matches_filter(url):
         return active_filter is None or any(p in url for p in active_filter)
+
+    def should_crawl_url(url):
+        """Decide if this URL should be crawled at all (not just stored)."""
+        # Always skip dynamic/tracking URLs
+        if DYNAMIC_PARAMS_SKIP.search(url):
+            return False
+        # When a filter is active, only crawl the homepage (for link discovery) and matching URLs
+        if active_filter is not None:
+            parsed_path = urlparse(url).path
+            # Allow the homepage so we can discover links from it
+            if parsed_path in ("", "/"):
+                return True
+            return any(p in url for p in active_filter)
+        return True
 
     session = requests.Session()
     session.headers.update(build_session_headers(use_spider_ua))
@@ -395,7 +417,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
 
     queue = [(start_url, 0)]
     for su in sitemap_urls:
-        if get_domain(su) == base_domain:
+        if get_domain(su) == base_domain and should_crawl_url(su):
             queue.append((su, 1))
 
     visited = set()
@@ -433,7 +455,8 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
         blocked_warning = f" | {blocked_count} blocked" if blocked_count > 0 else ""
         status_text.text(f"🕷️ Crawled {crawled} / {max_pages}{blocked_warning} — {url[:70]}...")
         time.sleep(delay + random.uniform(0, delay * 0.5))
-        return [(u, depth + 1) for u in discovered if get_domain(u) == base_domain]
+        # Only follow links that pass the crawl filter (skip dynamic URLs + respect page type filter)
+        return [(u, depth + 1) for u in discovered if get_domain(u) == base_domain and should_crawl_url(u)]
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {}
@@ -446,7 +469,10 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
                 futures[executor.submit(process_url, url, depth)] = True
             queue_idx += 1
 
-        while futures and crawled < max_pages:
+        def is_stopped():
+            return stop_flag is not None and stop_flag()
+
+        while futures and crawled < max_pages and not is_stopped():
             completed, _ = wait(set(futures.keys()), return_when=FIRST_COMPLETED)
             for f in completed:
                 try:
@@ -460,7 +486,7 @@ def run_spider(start_url, max_pages, threads, delay, progress_bar, status_text, 
                     pass
                 del futures[f]
 
-            while queue_idx < len(queue) and len(futures) < threads * 2 and crawled < max_pages:
+            while queue_idx < len(queue) and len(futures) < threads * 2 and crawled < max_pages and not is_stopped():
                 url, depth = queue[queue_idx]
                 norm = normalize_url(url)
                 with lock:
@@ -585,20 +611,31 @@ if crawl_button and url_input:
     if not url.startswith("http"):
         url = f"https://{url}"
     st.session_state.crawl_running = True
+    st.session_state.stop_crawl = False
     st.session_state.crawl_results = None
     st.session_state.image_results = None
 
     progress_bar = st.progress(0)
-    status_text = st.empty()
+    col_status, col_stop = st.columns([4, 1])
+    status_text = col_status.empty()
+    stop_button = col_stop.button("🛑 Stop Crawl", type="secondary", use_container_width=True)
+    if stop_button:
+        st.session_state.stop_crawl = True
 
     try:
         data, images, blocked = run_spider(url, max_pages, threads, delay, progress_bar, status_text, url_filter[1],
                                            proxy_url=proxy_input.strip() if proxy_input else None,
-                                           use_spider_ua=use_spider_ua)
+                                           use_spider_ua=use_spider_ua,
+                                           stop_flag=lambda: st.session_state.get("stop_crawl", False))
         st.session_state.crawl_results = data
         st.session_state.image_results = images
-        blocked_msg = f" ({blocked} blocked)" if blocked > 0 else ""
-        status_text.text(f"✅ Done! {len(data)} pages crawled{blocked_msg}. {len(images)} images audited.")
+        was_stopped = st.session_state.get("stop_crawl", False)
+        if was_stopped:
+            status_text.text(f"⏹️ Stopped! {len(data)} pages collected so far. {len(images)} images audited. Results available below.")
+            st.info("Crawl was stopped early. Partial results are shown below — you can download them as CSV.", icon="⏹️")
+        else:
+            blocked_msg = f" ({blocked} blocked)" if blocked > 0 else ""
+            status_text.text(f"✅ Done! {len(data)} pages crawled{blocked_msg}. {len(images)} images audited.")
         if blocked > 0:
             block_pct = round(blocked / max(len(data), 1) * 100)
             st.warning(
@@ -612,6 +649,7 @@ if crawl_button and url_input:
         st.error(f"Crawl failed: {str(e)}")
     finally:
         st.session_state.crawl_running = False
+        st.session_state.stop_crawl = False
 
 if st.session_state.crawl_results:
     data = st.session_state.crawl_results
