@@ -1,0 +1,12 @@
+# SEO Spider MCP server (the Streamlit UI is deployed separately via nixpacks).
+FROM python:3.12-slim
+WORKDIR /srv
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+COPY requirements-mcp.txt .
+RUN pip install --no-cache-dir -r requirements-mcp.txt
+COPY spider_core.py crawl_store.py oauth_store.py oauth_server.py mcp_server.py .
+ENV DATA_DIR=/data PORT=8000
+VOLUME ["/data"]
+EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -fsS http://localhost:8000/healthz || exit 1
+CMD ["python", "mcp_server.py"]
