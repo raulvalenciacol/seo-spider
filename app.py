@@ -10,6 +10,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import pandas as pd
 import hashlib
+import hmac
+import os
 import re
 import time
 import xml.etree.ElementTree as ET
@@ -39,6 +41,19 @@ st.markdown("""
     .footer { text-align: center; color: #888; font-size: 0.8rem; margin-top: 2rem; padding: 1rem; }
 </style>
 """, unsafe_allow_html=True)
+
+# Staff-only access. The gate is skipped when SPIDER_PASSWORD is unset so the
+# app still runs locally and on the public Streamlit Cloud copy.
+_SPIDER_PASSWORD = os.environ.get("SPIDER_PASSWORD", "")
+if _SPIDER_PASSWORD and not st.session_state.get("spider_authed"):
+    st.markdown('<p class="main-header">🕷️ SEO Spider</p>', unsafe_allow_html=True)
+    _pw = st.text_input("Clave de acceso", type="password")
+    if _pw:
+        if hmac.compare_digest(_pw, _SPIDER_PASSWORD):
+            st.session_state.spider_authed = True
+            st.rerun()
+        st.error("Clave incorrecta")
+    st.stop()
 
 if "crawl_running" not in st.session_state:
     st.session_state.crawl_running = False
