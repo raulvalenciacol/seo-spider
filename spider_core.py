@@ -69,6 +69,15 @@ def is_locale_path(url):
     return bool(LOCALE_PATH_RE.match(urlparse(url).path or "/"))
 
 
+# Images, downloads and assets aren't pages: crawling them only burns the page budget.
+ASSET_EXT_RE = re.compile(r"\.(jpe?g|png|webp|gif|svg|avif|ico|pdf|zip|mp4|webm|mov|css|js|json|xml|txt|md|woff2?|ttf)$", re.I)
+
+
+def is_asset_url(url):
+    path = urlparse(url).path or "/"
+    return path.startswith("/cdn/") or bool(ASSET_EXT_RE.search(path))
+
+
 def normalize_url(url):
     parsed = urlparse(url)
     path = parsed.path.rstrip("/") or "/"
@@ -372,7 +381,8 @@ def run_spider(start_url, max_pages, threads, delay, url_filter="all", proxy_url
         return active_filter is None or any(p in url for p in active_filter)
 
     def wanted(url):
-        return get_domain(url) == base_domain and not (skip_locale_paths and is_locale_path(url))
+        return (get_domain(url) == base_domain and not is_asset_url(url)
+                and not (skip_locale_paths and is_locale_path(url)))
 
     session = requests.Session()
     session.headers.update(build_session_headers(use_spider_ua))
