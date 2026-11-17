@@ -61,6 +61,14 @@ def get_domain(url):
     return urlparse(url).netloc
 
 
+# Shopify Markets / i18n prefixes such as /fr/, /es/, /en-ca/, /ja/.
+LOCALE_PATH_RE = re.compile(r"^/[a-z]{2}(?:-[a-z]{2})?(?:/|$)", re.I)
+
+
+def is_locale_path(url):
+    return bool(LOCALE_PATH_RE.match(urlparse(url).path or "/"))
+
+
 def normalize_url(url):
     parsed = urlparse(url)
     path = parsed.path.rstrip("/") or "/"
@@ -346,7 +354,7 @@ def parse_header_lines(text):
 
 
 def run_spider(start_url, max_pages, threads, delay, url_filter="all", proxy_url=None, use_spider_ua=False,
-               extra_headers=None, progress=None, should_stop=None):
+               extra_headers=None, progress=None, should_stop=None, skip_locale_paths=True):
     """Crawl a site. `progress(crawled, total, message)` is called as pages
     finish; `should_stop()` returning True ends the crawl early. Returns
     (rows, images, blocked_count)."""
@@ -362,6 +370,9 @@ def run_spider(start_url, max_pages, threads, delay, url_filter="all", proxy_url
 
     def url_matches_filter(url):
         return active_filter is None or any(p in url for p in active_filter)
+
+    def wanted(url):
+        return get_domain(url) == base_domain and not (skip_locale_paths and is_locale_path(url))
 
     session = requests.Session()
     session.headers.update(build_session_headers(use_spider_ua))
@@ -389,7 +400,7 @@ def run_spider(start_url, max_pages, threads, delay, url_filter="all", proxy_url
 
     queue = [(start_url, 0)]
     for su in sitemap_urls:
-        if get_domain(su) == base_domain:
+        if wanted(su):
             queue.append((su, 1))
 
     visited = set()
@@ -426,7 +437,7 @@ def run_spider(start_url, max_pages, threads, delay, url_filter="all", proxy_url
         blocked_warning = f" | {blocked_count} blocked" if blocked_count > 0 else ""
         _report(progress, crawled, max_pages, f"Crawled {crawled} / {max_pages}{blocked_warning} — {url[:70]}")
         time.sleep(delay + random.uniform(0, delay * 0.5))
-        return [(u, depth + 1) for u in discovered if get_domain(u) == base_domain]
+        return [(u, depth + 1) for u in discovered if wanted(u)]
 
     with ThreadPoolExecutor(max_workers=threads) as executor:
         futures = {}

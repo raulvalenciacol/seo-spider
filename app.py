@@ -72,6 +72,8 @@ with st.sidebar:
         ("Products + Collections", "products_and_collections"),
     ], format_func=lambda x: x[0])
 
+    skip_locales = st.checkbox("Skip translated paths (/fr/, /es/, /ja/…)", value=True,
+                               help="Shopify Markets publishes every page again under a language prefix. Leave this on to crawl only the main language.")
     max_pages = st.slider("Max Pages", 10, 50000, 500, step=10,
                           help="No limit when running locally!")
     threads = st.slider("Threads", 1, 20, 2, help="Concurrent requests — lower = safer")
@@ -186,7 +188,7 @@ if crawl_button and url_input:
                                            proxy_url=proxy_input.strip() if proxy_input else None,
                                            use_spider_ua=use_spider_ua,
                                            extra_headers=extra_headers or None,
-                                           progress=_progress)
+                                           progress=_progress, skip_locale_paths=skip_locales)
         st.session_state.crawl_results = data
         st.session_state.image_results = images
         blocked_msg = f" ({blocked} blocked)" if blocked > 0 else ""

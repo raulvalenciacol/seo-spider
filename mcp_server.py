@@ -99,6 +99,7 @@ def _run_crawl(crawl_id: int, start_url: str, settings: dict, stop: threading.Ev
             extra_headers=settings.get("_headers") or None,
             progress=progress,
             should_stop=stop.is_set,
+            skip_locale_paths=settings.get("skip_locale_paths", True),
         )
         store.crawl_finish(crawl_id, "stopped" if stop.is_set() else "done", rows, images, blocked)
         log.info("crawl %s finished: %d pages, %d images, %d blocked", crawl_id, len(rows), len(images), blocked)
@@ -122,6 +123,7 @@ def start_crawl(
     threads: int = 2,
     delay_seconds: float = 1.0,
     spider_user_agent: bool = False,
+    skip_locale_paths: bool = True,
 ) -> dict:
     """Start crawling a website in the background and return a crawl_id.
 
@@ -131,6 +133,8 @@ def start_crawl(
     (the last three only keep Shopify /products/ and /collections/ URLs).
     Headers saved with set_site_headers for this domain (e.g. a Shopify
     crawler signature) are sent automatically. Only one crawl runs at a time.
+    skip_locale_paths (default true) ignores translated copies under
+    /fr/, /es/, /en-ca/ etc., so only the main language is crawled.
     """
     start_url = _norm_start_url(url)
     if scope not in ("all", "products", "collections", "products_and_collections"):
@@ -153,7 +157,7 @@ def start_crawl(
         settings = {
             "max_pages": max_pages, "scope": scope, "threads": threads,
             "delay": delay_seconds, "spider_user_agent": bool(spider_user_agent),
-            "site_headers_used": bool(saved),
+            "skip_locale_paths": bool(skip_locale_paths), "site_headers_used": bool(saved),
         }
         crawl_id = store.crawl_create(domain, start_url, settings)
         stop = threading.Event()
